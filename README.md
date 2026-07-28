@@ -30,8 +30,9 @@ Command: Modern Operations(CMO) Steam 버전과 Python을 파일 기반으로 �
 PowerShell에서:
 
 ```powershell
-cd pycmo_tutorial3_project
-py -3.11 -m venv .venv
+cd pycmo_tutorial_project
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
