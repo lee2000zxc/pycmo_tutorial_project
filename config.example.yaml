@@ -1,0 +1,44 @@
+cmo:
+  install_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations'
+  import_export_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations\ImportExport'
+  lua_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations\Lua'
+  process_name: 'Command.exe'
+
+scenario:
+  title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
+  player_side: 'Blue'
+  controlled_unit: ''
+
+protocol:
+  action_filename: 'pycmo_agent_action.lua'
+  action_interval_seconds: 1
+  observation_interval_seconds: 5
+  observation_timeout_seconds: 60
+  poll_interval_seconds: 0.2
+  time_compression: 0
+
+reward:
+  score_delta_scale: 10.0
+  step_penalty: -0.01
+  success_bonus: 200.0
+  failure_penalty: -100.0
+
+rl:
+  waypoint_step_deg: 0.03
+  max_episode_steps: 100
+  target_success_distance_km: 20.0
+  max_target_distance_km: 300.0
+  distance_progress_scale: 0.2
+  contact_reward: 0.02
+  no_contact_penalty: -0.05
+  fuel_penalty_scale: 2.0
+  auto_launch: true
+  # false: 에피소드 종료 후 CMO 시나리오를 수동 재시작해야 함
+  # true: CMO 상태는 유지하고 Python의 에피소드 통계만 초기화
+  soft_reset: true
+
+tutorial3:
+  route: []
+  waypoint_reached_km: 3.0
+  default_speed_kts: null
+  default_altitude_m: null

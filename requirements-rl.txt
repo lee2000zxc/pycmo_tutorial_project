@@ -1,0 +1,4 @@
+-r requirements-gym.txt
+stable-baselines3>=2.3,<3
+tensorboard>=2.15
+rich>=13

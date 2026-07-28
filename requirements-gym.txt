@@ -1,0 +1,2 @@
+-r requirements.txt
+gymnasium>=0.29,<2

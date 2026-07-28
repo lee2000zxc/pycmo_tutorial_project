@@ -1,0 +1,2 @@
+-- This file is overwritten atomically by the Python client.
+-- Default no-op.
