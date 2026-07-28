@@ -172,17 +172,53 @@ pytest -q
 - 강화학습 전에 규칙 기반 명령이 안정적으로 동작하는지 먼저 확인해야 합니다.
 
 
-## 강화학습(PPO) 빠른 시작
+## 11. 강화학습(PPO)
+
+이 프로젝트는 CMO 시나리오를 Gymnasium 환경으로 감싸고 Stable-Baselines3의 PPO 에이전트를 학습할 수 있도록 구성되어 있습니다. CMO가 XML 관측 파일을 내보내면 Python이 이를 14차원 정규화 벡터로 변환하고, PPO가 선택한 행동은 Lua 파일을 통해 CMO에서 실행됩니다.
+
+> 설치, 설정, 관측·행동·보상 설계, 문제 해결 방법은 [PyCMO 강화학습 사용자 가이드](doc/PyCMO_RL_User_Guide.md)를 참고하세요.
+
+### 관측과 행동
+
+관측 벡터에는 아군 항공기의 고도·속도·방위·연료·점수와 가장 가까운 contact의 상대 위치·고도·거리·방위·속도·탐지 여부가 포함됩니다.
+
+행동 공간은 다음 10개의 이산 행동으로 구성됩니다.
+
+- `0`: no-op
+- `1`~`8`: 8방향 waypoint 이동
+- `9`: 가장 가까운 contact 공격
+
+RTB는 초기 무작위 학습 중 항공기가 자주 귀환하는 문제를 피하기 위해 RL 행동 공간에서 제외되어 있습니다. 지상에 있는 항공기는 `rl.auto_launch: true`일 때 행동보다 출격 명령이 우선 적용됩니다.
+
+### 빠른 시작
+
+먼저 CMO에서 대상 시나리오를 열고 Lua Console에서 `bootstrap.lua`를 실행해 관측·행동 브리지를 활성화해야 합니다.
 
 ```powershell
 python -m pip install -r requirements-rl.txt
 python scripts\install_lua.py
+```
+
+CMO Lua Console:
+
+```lua
+ScenEdit_RunScript('C:/Program Files (x86)/Steam/steamapps/common/Command - Modern Operations/Lua/pycmo_tutorial3/bootstrap.lua', true)
+```
+
+연결과 Gymnasium 환경을 확인한 뒤 PPO를 학습하고 평가합니다.
+
+```powershell
+python scripts\print_observation.py
 python scripts\random_rl_rollout.py --steps 10
 python scripts\check_rl_env.py
 python scripts\train_ppo.py --timesteps 1000
 python scripts\evaluate_ppo.py
 ```
 
-관측은 14차원 정규화 벡터이며, 가장 가까운 contact의 상대 위치·거리·방위·고도·속도를 포함합니다. 행동은 no-op, 8방향 waypoint, RTB의 10개 이산 행동입니다. 지상 항공기는 `rl.auto_launch: true`일 때 자동 출격합니다.
+학습 결과와 TensorBoard 로그는 기본적으로 `outputs/ppo/`에 저장됩니다. 빠른 동작 확인에는 `--timesteps 128`, 초기 학습 실험에는 `--timesteps 1000`을 사용할 수 있습니다.
 
-`rl.soft_reset: true`는 Python의 에피소드 통계만 초기화하며 CMO 시나리오 자체는 되돌리지 않습니다. 엄밀한 반복 학습을 위해서는 이후 CMO 시나리오 자동 재시작 브리지를 추가해야 합니다. 초기 연결 및 PPO 학습 가능성 확인에는 soft reset을 사용할 수 있습니다.
+### 보상과 에피소드 초기화
+
+보상은 기본 step penalty에 contact 탐지, 목표와의 거리 변화, CMO 점수 변화, 연료 소모를 반영하며 목표 거리 이내에 접근하면 성공 보상을 부여합니다. 관련 계수는 `config.yaml`의 `reward`와 `rl` 항목에서 조정합니다.
+
+`rl.soft_reset: true`는 Python의 에피소드 step, 이전 목표 거리, 이전 연료량만 초기화합니다. CMO 시나리오 시간, 항공기 위치·연료, contact 및 임무 상태는 되돌리지 않으므로 엄밀한 반복 학습에는 시나리오 자동 reload 기능이 추가로 필요합니다. 초기 연결과 PPO 학습 가능성 확인에는 soft reset을 사용할 수 있습니다.
