@@ -1,0 +1,10 @@
+rl:
+  attack_weapon_candidates:
+    - 718
+    - 51
+    - 42
+  attack_weapon_quantity: 1
+  attack_min_distance_km: 5.0
+  attack_max_distance_km: 80.0
+  attack_cooldown_steps: 3
+  invalid_attack_penalty: -0.05
