@@ -6,6 +6,7 @@ from .actions import Action
 from .config import AppConfig
 from .models import Observation, UnitState
 from .protocol import FileProtocol
+from .scenario_controller import SteamScenarioController
 
 
 @dataclass(frozen=True)
@@ -18,11 +19,26 @@ class StepResult:
 
 
 class CMOEnvironment:
-    def __init__(self, config: AppConfig):
+    def __init__(
+        self,
+        config: AppConfig,
+        scenario_controller: SteamScenarioController | None = None,
+    ):
         self.config = config
         self.protocol = FileProtocol(config)
+        self.scenario_controller = (
+            scenario_controller
+            if scenario_controller is not None
+            else SteamScenarioController(config)
+        )
         self._previous_score = 0.0
         self._step = 0
+
+    def restart_scenario(self) -> None:
+        self.protocol.prepare_for_scenario_restart()
+        message = self.scenario_controller.restart()
+        if message:
+            print(f"[CMO auto-load] {message}")
 
     def reset(self) -> tuple[Observation, dict[str, object]]:
         self.protocol.initialize_action_file()

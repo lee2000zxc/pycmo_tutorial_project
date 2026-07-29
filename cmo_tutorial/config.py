@@ -23,6 +23,16 @@ class ScenarioConfig:
 
 
 @dataclass(frozen=True)
+class AutoResetConfig:
+    enabled: bool
+    reload_on_first_reset: bool
+    scenario_window_title: str
+    restart_timeout_seconds: float
+    menu_delay_seconds: float
+    target_time_compression: int
+
+
+@dataclass(frozen=True)
 class ProtocolConfig:
     action_filename: str
     action_interval_seconds: int
@@ -45,6 +55,12 @@ class RewardConfig:
 
 @dataclass(frozen=True)
 class RLConfig:
+    attack_weapon_candidates: tuple[int, ...]
+    attack_weapon_quantity: int
+    attack_min_distance_km: float
+    attack_max_distance_km: float
+
+    attack_cooldown_steps: int
     waypoint_step_deg: float
     max_episode_steps: int
     target_success_distance_km: float
@@ -91,6 +107,7 @@ class Tutorial3Config:
 class AppConfig:
     cmo: CMOConfig
     scenario: ScenarioConfig
+    auto_reset: AutoResetConfig
     protocol: ProtocolConfig
     reward: RewardConfig
     rl: RLConfig
@@ -147,6 +164,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
 
     cmo = _required(raw, "cmo")
     scenario = _required(raw, "scenario")
+    auto_reset = raw.get("auto_reset", {})
     protocol = _required(raw, "protocol")
     reward = raw.get("reward", {})
     rl = raw.get("rl", {})
@@ -155,6 +173,15 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     route = tuple(
         (float(point[0]), float(point[1]))
         for point in tutorial3.get("route", [])
+    )
+
+    weapon_candidates = tuple(
+        int(dbid)
+        for dbid in rl.get(
+            "attack_weapon_candidates",
+            [],
+        )
+        if int(dbid) > 0
     )
 
     return AppConfig(
@@ -175,6 +202,40 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
             controlled_unit=str(
                 scenario.get("controlled_unit", "")
+            ),
+        ),
+        auto_reset=AutoResetConfig(
+            enabled=_bool_value(
+                auto_reset.get("enabled"),
+                False,
+            ),
+            reload_on_first_reset=_bool_value(
+                auto_reset.get("reload_on_first_reset"),
+                True,
+            ),
+            scenario_window_title=str(
+                auto_reset.get(
+                    "scenario_window_title",
+                    scenario["title"],
+                )
+            ),
+            restart_timeout_seconds=float(
+                auto_reset.get(
+                    "restart_timeout_seconds",
+                    60.0,
+                )
+            ),
+            menu_delay_seconds=float(
+                auto_reset.get(
+                    "menu_delay_seconds",
+                    1.0,
+                )
+            ),
+            target_time_compression=int(
+                auto_reset.get(
+                    "target_time_compression",
+                    5,
+                )
             ),
         ),
         protocol=ProtocolConfig(
@@ -224,69 +285,178 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
         ),
         rl=RLConfig(
+            # 공격 관련 설정
+            attack_weapon_candidates=weapon_candidates,
+            attack_weapon_quantity=int(
+                rl.get(
+                    "attack_weapon_quantity",
+                    1,
+                )
+            ),
+            attack_min_distance_km=float(
+                rl.get(
+                    "attack_min_distance_km",
+                    5.0,
+                )
+            ),
+            attack_max_distance_km=float(
+                rl.get(
+                    "attack_max_distance_km",
+                    80.0,
+                )
+            ),
+            attack_cooldown_steps=int(
+                rl.get(
+                    "attack_cooldown_steps",
+                    3,
+                )
+            ),
+
+            # 기본 행동 및 에피소드 설정
             waypoint_step_deg=float(
-                rl.get("waypoint_step_deg", 0.03)
+                rl.get(
+                    "waypoint_step_deg",
+                    0.03,
+                )
             ),
             max_episode_steps=int(
-                rl.get("max_episode_steps", 100)
+                rl.get(
+                    "max_episode_steps",
+                    100,
+                )
             ),
             target_success_distance_km=float(
-                rl.get("target_success_distance_km", 20.0)
+                rl.get(
+                    "target_success_distance_km",
+                    20.0,
+                )
             ),
             max_target_distance_km=float(
-                rl.get("max_target_distance_km", 300.0)
+                rl.get(
+                    "max_target_distance_km",
+                    300.0,
+                )
             ),
+
+            # 거리 기반 보상
             distance_progress_scale=float(
-                rl.get("distance_progress_scale", 1.0)
+                rl.get(
+                    "distance_progress_scale",
+                    1.0,
+                )
             ),
+
+            # 접촉 관련 보상
             contact_acquired_reward=float(
-                rl.get("contact_acquired_reward", 0.1)
+                rl.get(
+                    "contact_acquired_reward",
+                    0.1,
+                )
             ),
             contact_maintain_reward=float(
-                rl.get("contact_maintain_reward", 0.005)
+                rl.get(
+                    "contact_maintain_reward",
+                    0.005,
+                )
             ),
             no_contact_penalty=float(
-                rl.get("no_contact_penalty", -0.02)
+                rl.get(
+                    "no_contact_penalty",
+                    -0.02,
+                )
             ),
+
+            # 표적 방향 정렬 보상
             heading_alignment_scale=float(
-                rl.get("heading_alignment_scale", 0.02)
+                rl.get(
+                    "heading_alignment_scale",
+                    0.02,
+                )
             ),
+
+            # 적정 교전 거리 보상
             preferred_attack_min_km=float(
-                rl.get("preferred_attack_min_km", 25.0)
+                rl.get(
+                    "preferred_attack_min_km",
+                    25.0,
+                )
             ),
             preferred_attack_max_km=float(
-                rl.get("preferred_attack_max_km", 60.0)
+                rl.get(
+                    "preferred_attack_max_km",
+                    60.0,
+                )
             ),
             preferred_range_reward=float(
-                rl.get("preferred_range_reward", 0.05)
+                rl.get(
+                    "preferred_range_reward",
+                    0.05,
+                )
             ),
+
+            # 과도한 근접 패널티
             too_close_distance_km=float(
-                rl.get("too_close_distance_km", 10.0)
+                rl.get(
+                    "too_close_distance_km",
+                    10.0,
+                )
             ),
             too_close_penalty=float(
-                rl.get("too_close_penalty", -0.05)
+                rl.get(
+                    "too_close_penalty",
+                    -0.05,
+                )
             ),
+
+            # 공격 action 관련 보상
             valid_attack_reward=float(
-                rl.get("valid_attack_reward", 0.02)
+                rl.get(
+                    "valid_attack_reward",
+                    0.02,
+                )
             ),
             invalid_attack_penalty=float(
-                rl.get("invalid_attack_penalty", -0.05)
+                rl.get(
+                    "invalid_attack_penalty",
+                    -0.05,
+                )
             ),
             attack_request_cost=float(
-                rl.get("attack_request_cost", -0.01)
+                rl.get(
+                    "attack_request_cost",
+                    -0.01,
+                )
             ),
+
+            # 연료 및 행동 변경 패널티
             fuel_penalty_scale=float(
-                rl.get("fuel_penalty_scale", 1.0)
+                rl.get(
+                    "fuel_penalty_scale",
+                    1.0,
+                )
             ),
             action_change_penalty=float(
-                rl.get("action_change_penalty", -0.002)
+                rl.get(
+                    "action_change_penalty",
+                    -0.002,
+                )
             ),
+
+            # 보상 범위 제한
             reward_clip_min=float(
-                rl.get("reward_clip_min", -200.0)
+                rl.get(
+                    "reward_clip_min",
+                    -200.0,
+                )
             ),
             reward_clip_max=float(
-                rl.get("reward_clip_max", 200.0)
+                rl.get(
+                    "reward_clip_max",
+                    200.0,
+                )
             ),
+
+            # 환경 동작
             auto_launch=_bool_value(
                 rl.get("auto_launch"),
                 True,

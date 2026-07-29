@@ -134,7 +134,7 @@ python scripts/run_tutorial3_agent.py --steps 50
 python scripts/check_gym_env.py
 ```
 
-환경은 CMO 자체를 자동 재시작하지 않습니다. 한 에피소드가 끝나면 시나리오를 다시 불러오고 Lua bootstrap을 재실행하는 방식으로 먼저 검증하십시오.
+기본 설정에서는 CMO 상태를 유지한 채 Python 상태만 초기화합니다. `auto_reset.enabled: true`를 사용하면 에피소드 사이에 `File → Load Recent`의 첫 시나리오를 자동으로 다시 불러올 수 있습니다.
 
 ## 7. 통신 방식
 
@@ -218,8 +218,52 @@ python scripts\evaluate_ppo.py
 
 학습 결과와 TensorBoard 로그는 기본적으로 `outputs/ppo/`에 저장됩니다. 빠른 동작 확인에는 `--timesteps 128`, 초기 학습 실험에는 `--timesteps 1000`을 사용할 수 있습니다.
 
+각 episode가 끝나면 reward가 콘솔에 출력되고 `outputs/ppo/episode_rewards.csv`에 누적됩니다.
+
+```text
+[Episode] 3 | reward=104.352100 | length=200 | total_timesteps=600
+```
+
+PowerShell에서 최근 결과를 확인할 수 있습니다.
+
+```powershell
+Import-Csv outputs\ppo\episode_rewards.csv |
+    Select-Object -Last 20 |
+    Format-Table episode, total_timesteps, reward, length
+```
+
+TensorBoard에서는 `episode/reward`, `episode/length`, `rollout/ep_rew_mean`을 확인합니다.
+
+```powershell
+tensorboard --logdir outputs\ppo\tensorboard
+```
+
 ### 보상과 에피소드 초기화
 
 보상은 기본 step penalty에 contact 탐지, 목표와의 거리 변화, CMO 점수 변화, 연료 소모를 반영하며 목표 거리 이내에 접근하면 성공 보상을 부여합니다. 관련 계수는 `config.yaml`의 `reward`와 `rl` 항목에서 조정합니다.
 
-`rl.soft_reset: true`는 Python의 에피소드 step, 이전 목표 거리, 이전 연료량만 초기화합니다. CMO 시나리오 시간, 항공기 위치·연료, contact 및 임무 상태는 되돌리지 않으므로 엄밀한 반복 학습에는 시나리오 자동 reload 기능이 추가로 필요합니다. 초기 연결과 PPO 학습 가능성 확인에는 soft reset을 사용할 수 있습니다.
+`rl.soft_reset: true`는 Python의 에피소드 step, 이전 목표 거리, 이전 연료량만 초기화합니다. CMO 상태까지 초기화하는 반복 학습에는 Steam UI 기반 자동 로드를 사용할 수 있습니다.
+
+```yaml
+auto_reset:
+  enabled: true
+  reload_on_first_reset: true
+  scenario_window_title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
+  restart_timeout_seconds: 60
+  menu_delay_seconds: 1
+  target_time_compression: 5
+```
+
+자동 로드를 사용하기 전에 CMO에서 `bootstrap.lua`를 실행한 상태로 시나리오를 저장하고, 해당 파일이 `File → Load Recent` 목록 맨 위에 있는지 확인해야 합니다. 그래야 다시 불러온 시나리오에도 관측·행동 이벤트가 남아 있습니다. `reload_on_first_reset: true`이므로 `train_ppo.py`가 시작될 때 수행하는 첫 `env.reset()`부터 최근 시나리오를 다시 불러옵니다.
+
+현재 `rl.max_episode_steps: 200`으로 설정되어 있어 정상 진행 중에는 200번째 step에서 에피소드가 잘리고, PPO가 다음 `reset()`을 호출할 때 시나리오를 자동으로 다시 불러옵니다. 시나리오 자체가 종료되거나 성공·실패 terminal 조건이 먼저 발생하면 해당 시점에 조기 reset됩니다.
+
+`Side selection and briefing` 탐색이나 화면 좌표 클릭은 사용하지 않습니다. 최근 시나리오를 직접 불러온 뒤 CMO 창에서 `Enter`로 1배속을 설정하고 Numpad `+` 키를 두 번 보내 5배속으로 변경한 다음 `Space`로 시뮬레이션을 시작합니다. Python 에이전트는 새 observation에서 `scenario.controlled_unit`으로 지정된 항공기를 다시 선택합니다. 이름을 비워 두면 첫 번째 아군 Aircraft를 선택합니다.
+
+학습 전에 자동 로드만 따로 시험할 수 있습니다.
+
+```powershell
+python scripts\restart_scenario.py
+```
+
+이 기능은 [duyminh1998/pycmo Steam 데모](https://github.com/duyminh1998/pycmo)의 UI 자동화 방식을 참고했습니다.

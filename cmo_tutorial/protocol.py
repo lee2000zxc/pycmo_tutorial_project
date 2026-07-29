@@ -98,6 +98,21 @@ class FileProtocol:
     def initialize_action_file(self) -> None:
         self.send(noop())
 
+    def prepare_for_scenario_restart(self) -> None:
+        """Ignore stale files and clear the previous end marker."""
+        path = self.config.observation_path
+        if path.exists():
+            stat = path.stat()
+            self._last_signature = (stat.st_mtime_ns, stat.st_size)
+
+        try:
+            self.config.scenario_ended_path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                "이전 scenario-ended 파일을 제거하지 못했습니다: "
+                f"{self.config.scenario_ended_path}"
+            ) from exc
+
     def _ended(self) -> bool:
         path = self.config.scenario_ended_path
         if not path.exists():

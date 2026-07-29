@@ -13,7 +13,7 @@ except ImportError as exc:
     ) from exc
 
 from .actions import (
-    attack_contact,
+    fire_first_available_weapon,
     launch,
     noop,
     set_course,
@@ -45,6 +45,7 @@ class CMOTutorialGymEnv(gym.Env):
         self.previous_action: int | None = None
         self.previous_contact_exists = False
 
+        self.last_attack_step: int | None = None
         self.valid_attack = False
         self.invalid_attack = False
         self.invalid_attack_reason: str | None = None
@@ -278,6 +279,14 @@ class CMOTutorialGymEnv(gym.Env):
         super().reset(seed=seed)
 
         if (
+            self.config.auto_reset.enabled
+            and (
+                self.reset_count > 0
+                or self.config.auto_reset.reload_on_first_reset
+            )
+        ):
+            self.env.restart_scenario()
+        elif (
             self.reset_count > 0
             and not self.config.rl.soft_reset
         ):
@@ -296,6 +305,7 @@ class CMOTutorialGymEnv(gym.Env):
         self.invalid_attack = False
         self.invalid_attack_reason = None
         self.previous_action = None
+        self.last_attack_step = None
 
         unit = self._unit(observation)
         _, distance_km = self._nearest_contact(
@@ -309,8 +319,19 @@ class CMOTutorialGymEnv(gym.Env):
 
         info.update(
             {
-                "soft_reset": self.reset_count > 1,
+                "soft_reset": (
+                    self.reset_count > 1
+                    and not self.config.auto_reset.enabled
+                ),
+                "scenario_restarted": (
+                    self.config.auto_reset.enabled
+                    and (
+                        self.reset_count > 1
+                        or self.config.auto_reset.reload_on_first_reset
+                    )
+                ),
                 "target_distance_km": distance_km,
+                "controlled_unit": unit.name,
             }
         )
         return self._vector(observation), info
@@ -347,20 +368,56 @@ class CMOTutorialGymEnv(gym.Env):
                     "observation_not_available"
                 )
 
-            target, _ = self._nearest_contact(
+            target, distance_km = self._nearest_contact(
                 self.current_observation,
                 unit,
             )
 
-            if target is None:
+            if target is None or distance_km is None:
                 return self._mark_invalid_attack(
                     "target_not_available"
                 )
 
+            if not (
+                self.config.rl.attack_min_distance_km
+                <= distance_km
+                <= self.config.rl.attack_max_distance_km
+            ):
+                return self._mark_invalid_attack(
+                    "target_out_of_attack_range"
+                )
+
+            if self.last_attack_step is not None:
+                elapsed_steps = (
+                    self.episode_steps
+                    - self.last_attack_step
+                )
+
+                if (
+                    elapsed_steps
+                    < self.config.rl.attack_cooldown_steps
+                ):
+                    return self._mark_invalid_attack(
+                        "attack_cooldown"
+                    )
+
+            if not self.config.rl.attack_weapon_candidates:
+                return self._mark_invalid_attack(
+                    "weapon_candidates_empty"
+                )
+
             self.valid_attack = True
-            return attack_contact(
+            self.last_attack_step = self.episode_steps
+
+            return fire_first_available_weapon(
                 attacker_guid=unit.guid,
                 contact_guid=target.guid,
+                candidate_dbids=(
+                    self.config.rl.attack_weapon_candidates
+                ),
+                quantity=(
+                    self.config.rl.attack_weapon_quantity
+                ),
             )
 
         if unit.latitude is None or unit.longitude is None:
@@ -557,31 +614,21 @@ class CMOTutorialGymEnv(gym.Env):
         self.current_observation = current_observation
         self.episode_steps += 1
 
-        proximity_success = (
-            distance_km is not None
-            and distance_km
-            <= self.config.rl.target_success_distance_km
-        )
         mission_success = bool(
             result.terminated and current_score > 0
         )
         success = bool(
             enemy_destroyed
             or mission_success
-            or proximity_success
         )
         terminated = bool(
             result.terminated
             or enemy_destroyed
-            or proximity_success
         )
         truncated = (
             self.episode_steps
             >= self.config.rl.max_episode_steps
         )
-
-        if proximity_success:
-            reward += self.config.reward.success_bonus
 
         if mission_success:
             reward += self.config.reward.mission_success_reward
@@ -604,7 +651,6 @@ class CMOTutorialGymEnv(gym.Env):
                 "selected_action": selected_action.name,
                 "target_distance_km": distance_km,
                 "success": success,
-                "proximity_success": proximity_success,
                 "enemy_destroyed": enemy_destroyed,
                 "mission_success": mission_success,
                 "ownship_destroyed": ownship_destroyed,
@@ -612,6 +658,7 @@ class CMOTutorialGymEnv(gym.Env):
                 "invalid_attack": self.invalid_attack,
                 "invalid_attack_reason": self.invalid_attack_reason,
                 "valid_attack": self.valid_attack,
+                "last_attack_step": self.last_attack_step,
                 "heading_alignment": alignment,
                 "score_delta": score_delta,
             }
@@ -624,3 +671,4 @@ class CMOTutorialGymEnv(gym.Env):
             truncated,
             info,
         )
+

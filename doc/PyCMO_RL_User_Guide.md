@@ -183,6 +183,14 @@ scenario:
   player_side: 'Blue'
   controlled_unit: ''
 
+auto_reset:
+  enabled: false
+  reload_on_first_reset: true
+  scenario_window_title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
+  restart_timeout_seconds: 60
+  menu_delay_seconds: 1
+  target_time_compression: 5
+
 protocol:
   action_filename: 'pycmo_agent_action.lua'
   action_interval_seconds: 5
@@ -199,7 +207,7 @@ reward:
 
 rl:
   waypoint_step_deg: 0.03
-  max_episode_steps: 100
+  max_episode_steps: 200
   target_success_distance_km: 20.0
   max_target_distance_km: 300.0
   distance_progress_scale: 0.2
@@ -221,9 +229,14 @@ rl:
 | `observation_interval_seconds` | 관측 XML을 내보내는 간격 |
 | `time_compression` | CMO 시간 압축 코드 |
 | `waypoint_step_deg` | 방향 action 1회당 waypoint 이동량 |
+| `max_episode_steps` | 정상 진행 시 자동 로드 전까지 실행할 최대 step 수 |
 | `target_success_distance_km` | 표적 접근 성공 거리 |
 | `auto_launch` | 지상 항공기를 자동 출격시킬지 여부 |
 | `soft_reset` | CMO 시나리오 초기화 없이 Python 내부 episode만 초기화 |
+| `auto_reset.enabled` | reset 시 `File → Load Recent`의 첫 시나리오 자동 로드 |
+| `reload_on_first_reset` | `train_ppo.py` 시작 시 첫 reset부터 자동 로드할지 여부 |
+| `scenario_window_title` | Windows에서 활성화할 CMO 시나리오 창 제목 |
+| `target_time_compression` | 로드 후 적용할 배속. 지원 값은 1, 2, 5 |
 
 ---
 
@@ -669,7 +682,7 @@ success = (
 
 ---
 
-## 21. Episode reset 한계
+## 21. Episode reset과 자동 로드
 
 `soft_reset: true`는 Python 내부 상태만 초기화합니다.
 
@@ -692,7 +705,45 @@ contact 상태
 미션 상태
 ```
 
-엄밀한 학습에는 CMO 시나리오 자체를 reload하는 자동 reset이 필요합니다.
+CMO 상태까지 초기화하려면 `auto_reset.enabled: true`로 설정합니다. `reload_on_first_reset: true`이면 `train_ppo.py` 시작 시 Stable-Baselines3가 호출하는 첫 `reset()`부터 다음 순서로 동작합니다.
+
+`max_episode_steps: 200`이면 200번째 `step()`이 `truncated=True`를 반환합니다. Stable-Baselines3는 이 신호를 받은 뒤 `reset()`을 호출하므로 `File → Load Recent` 자동 로드가 시작됩니다. 시나리오 종료나 성공·실패 terminal 조건이 먼저 발생하면 200 step 이전에도 reset될 수 있습니다.
+
+자동화는 `Side selection and briefing` 창을 탐색하거나 클릭하지 않습니다. 최근 파일을 직접 불러온 뒤 CMO 시나리오 창을 활성화합니다. 이어서 `Enter`로 배속을 1배로 초기화하고 Numpad `+`를 두 번 입력해 5배속으로 변경한 뒤 `Space`로 시뮬레이션을 즉시 시작합니다. 일반 키보드의 `+`가 아니라 Windows `SendKeys`의 `{ADD}` 키 코드를 사용합니다. 최종 로드 성공 여부는 `protocol.observation_timeout_seconds` 동안 새로운 observation 파일이 생성되는지로 판단합니다.
+
+새 observation을 읽으면 에이전트는 `scenario.controlled_unit`과 이름이 일치하는 아군 항공기를 다시 선택합니다. 이 설정이 빈 문자열이면 첫 번째 아군 Aircraft를 선택합니다.
+
+```text
+이전 관측·종료 파일 상태 기록
+→ CMO File → Load Recent 메뉴 실행
+→ 최근 시나리오 목록의 첫 파일 선택
+→ Enter 입력으로 1배속 초기화
+→ Numpad + 키 2회로 5배속 설정
+→ Space 입력으로 시뮬레이션 시작
+→ 저장된 PyCMO 이벤트가 새 관측 생성
+→ controlled_unit 재선택
+→ Python이 새 관측을 확인한 후 다음 episode 시작
+```
+
+자동 로드를 사용하기 전에 다음 준비가 필요합니다.
+
+1. CMO에서 학습할 시나리오를 엽니다.
+2. `bootstrap.lua`를 실행해 PyCMO 관측·행동 이벤트를 설치합니다.
+3. 이벤트가 포함된 상태로 시나리오를 저장합니다.
+4. 저장한 파일이 `File → Load Recent` 목록 맨 위에 있는지 확인합니다.
+5. `config.yaml`에서 `auto_reset.enabled: true`로 설정합니다.
+
+학습 전에 재시작 동작과 새 관측 생성을 독립적으로 확인합니다.
+
+```powershell
+python scripts\restart_scenario.py
+```
+
+자동화는 [duyminh1998/pycmo Steam 데모](https://github.com/duyminh1998/pycmo)의 UI 재시작 방식을 참고합니다. CMO 메뉴와 팝업을 Windows 키 입력 및 마우스 클릭으로 조작하므로 다음 조건을 지켜야 합니다.
+
+- 학습 중 CMO 창을 닫지 않습니다.
+- `scenario_window_title`이 실제 창 제목과 일치해야 합니다.
+- CMO 메뉴 구조가 달라진 빌드에서는 `scripts/restart_cmo_scenario.ps1`의 메뉴 키 순서를 조정해야 할 수 있습니다.
 
 ---
 
@@ -824,6 +875,30 @@ fps: 0
 - `explained_variance < 0`: critic이 아직 reward를 잘 예측하지 못함
 - `fps = 0`: 한 step이 수 초 걸려 정수 FPS가 1 미만으로 표시됨
 
+각 episode가 종료되면 `train_ppo.py`가 reward를 콘솔에 출력합니다.
+
+```text
+[Episode] 3 | reward=104.352100 | length=200 | total_timesteps=600
+```
+
+전체 이력은 `outputs/ppo/episode_rewards.csv`에 누적됩니다.
+
+| 열 | 설명 |
+|---|---|
+| `episode` | resume 실행을 포함한 누적 episode 번호 |
+| `total_timesteps` | episode 종료 시 모델의 누적 timestep |
+| `reward` | 해당 episode의 reward 합계 |
+| `length` | 해당 episode의 실제 step 수 |
+| `elapsed_seconds` | 현재 학습 실행의 경과 시간 |
+
+```powershell
+Import-Csv outputs\ppo\episode_rewards.csv |
+    Select-Object -Last 20 |
+    Format-Table episode, total_timesteps, reward, length
+```
+
+TensorBoard에서는 `episode/reward`, `episode/length`, `rollout/ep_rew_mean`을 함께 비교합니다.
+
 ---
 
 ## 27. 학습 재개
@@ -945,7 +1020,7 @@ RTB를 RL action에서 제거하고 필요 시 환경 안전 규칙으로 처리
 
 ## 31. 현재 구현의 한계
 
-1. CMO 시나리오 자동 reset 미구현
+1. 자동 reset이 CMO Steam UI와 화면 좌표에 의존
 2. 단일 아군기 중심
 3. 가장 가까운 contact만 사용
 4. 무장 상태 observation 미포함
@@ -959,15 +1034,13 @@ RTB를 RL action에서 제거하고 필요 시 환경 안전 규칙으로 처리
 
 ## 32. 향후 개선 방향
 
-### 시나리오 자동 reset
+### 시나리오 자동 reset 안정화
 
 ```text
-episode 종료
-→ Python reset 요청
-→ CMO 시나리오 reload
-→ bootstrap 재설치
-→ 초기 observation 생성
-→ 다음 episode
+화면 좌표 기반 클릭 제거
+→ Windows UI Automation으로 버튼 탐색
+→ CMO 창·팝업 상태 진단 강화
+→ 실패한 episode 재시작 복구
 ```
 
 ### 공격 observation 확장
@@ -1019,7 +1092,7 @@ Python 단순 전투 환경
 10. PPO 128 step 테스트
 11. PPO 1000 step 테스트
 12. reward 로그 분석
-13. 자동 scenario reset 구현
+13. 자동 scenario reset 활성화 및 반복 검증
 14. 격추 및 생존 reward 추가
 15. 장기 학습 수행
 
@@ -1075,6 +1148,7 @@ CMO 파일 통신
 + reward shaping
 + Gymnasium wrapper
 + PPO 학습
++ Steam UI 기반 자동 scenario reset
 ```
 
-연구 수준의 반복 학습으로 발전시키기 위해서는 **자동 scenario reset**, **무장 상태 observation**, **격추/생존 reward**, **복수 유닛 확장**이 다음 핵심 과제입니다.
+연구 수준의 반복 학습으로 발전시키기 위해서는 **자동 scenario reset 안정화**, **무장 상태 observation**, **격추/생존 reward**, **복수 유닛 확장**이 다음 핵심 과제입니다.
