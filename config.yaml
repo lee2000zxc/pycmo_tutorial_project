@@ -1,0 +1,91 @@
+cmo:
+  install_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations'
+  import_export_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations\ImportExport'
+  lua_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Command - Modern Operations\Lua'
+  process_name: 'Command.exe'
+
+scenario:
+  title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
+  player_side: 'Israel'
+  controlled_unit: 'Sufa #1'
+
+auto_reset:
+  enabled: true
+  reload_on_first_reset: true
+  scenario_window_title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
+  restart_timeout_seconds: 60
+  menu_delay_seconds: 1
+  target_time_compression: 5
+
+protocol:
+  action_filename: 'pycmo_agent_action.lua'
+  action_interval_seconds: 5
+  observation_interval_seconds: 5
+  observation_timeout_seconds: 60
+  poll_interval_seconds: 0.2
+  time_compression: 2
+
+#tutorial3:
+#  route: []
+  # 예시:
+  # route:
+  #   - [36.1000, 127.1000]
+  #   - [36.1500, 127.1500]
+#  waypoint_reached_km: 3.0
+#  default_speed_kts: null
+#  default_altitude_m: null
+
+reward:
+  score_delta_scale: 1.0
+  step_penalty: -0.01
+  success_bonus: 5.0
+  failure_penalty: -100.0
+
+  kill_reward: 100.0
+  ownship_loss_penalty: -100.0
+  mission_success_reward: 150.0
+
+rl:
+  attack_weapon_candidates:
+    - 516
+    - 51
+    - 42
+
+  attack_weapon_quantity: 1
+  attack_min_distance_km: 5.0
+  attack_max_distance_km: 80.0
+  attack_cooldown_steps: 3
+
+  waypoint_step_deg: 0.03
+  # 200번째 step 후 truncated=True가 되어 다음 reset에서 시나리오 자동 로드
+  max_episode_steps: 200
+  target_success_distance_km: 0.0
+  max_target_distance_km: 300.0
+
+  distance_progress_scale: 1.0
+
+  contact_acquired_reward: 0.5
+  contact_maintain_reward: 0.01
+  no_contact_penalty: -0.05
+
+  heading_alignment_scale: 0.01
+
+  preferred_attack_min_km: 25.0
+  preferred_attack_max_km: 60.0
+  preferred_range_reward: 0.1
+
+  too_close_distance_km: 10.0
+  too_close_penalty: -0.2
+
+  valid_attack_reward: 0.5
+  invalid_attack_penalty: -0.2
+  attack_request_cost: -0.02
+
+  fuel_penalty_scale: 1.0
+  action_change_penalty: -0.002
+
+  reward_clip_min: -200.0
+  reward_clip_max: 200.0
+
+  auto_launch: true
+  soft_reset: true
