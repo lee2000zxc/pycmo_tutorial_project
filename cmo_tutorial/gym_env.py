@@ -44,6 +44,9 @@ class CMOTutorialGymEnv(gym.Env):
         self.previous_fuel_ratio: float | None = None
         self.previous_action: int | None = None
         self.previous_contact_exists = False
+        self.previous_target_contact_guids: set[str] = set()
+        self.episode_initial_score = 0.0
+        self.episode_enemy_destroyed = False
 
         self.last_attack_step: int | None = None
         self.valid_attack = False
@@ -58,6 +61,10 @@ class CMOTutorialGymEnv(gym.Env):
             shape=(14,),
             dtype=np.float32,
         )
+
+    def close(self) -> None:
+        self.env.close()
+        super().close()
 
     def _unit(
         self,
@@ -94,13 +101,35 @@ class CMOTutorialGymEnv(gym.Env):
             self.config.scenario.player_side
         )
 
-        valid_contacts = [
+        positioned_contacts = [
             contact
             for contact in side.contacts
             if contact.latitude is not None
             and contact.longitude is not None
             and contact.guid
+            and (contact.contact_type or "").strip().lower()
+            in self.config.rl.target_contact_types
         ]
+
+        if not positioned_contacts:
+            return None, None
+
+        # New bridge versions export posture. When posture is unavailable for
+        # every contact, retain compatibility with older saved scenarios.
+        hostile_contacts = [
+            contact
+            for contact in positioned_contacts
+            if contact.is_hostile
+        ]
+        posture_available = any(
+            contact.posture is not None
+            for contact in positioned_contacts
+        )
+        valid_contacts = (
+            hostile_contacts
+            if posture_available
+            else positioned_contacts
+        )
 
         if not valid_contacts:
             return None, None
@@ -132,6 +161,30 @@ class CMOTutorialGymEnv(gym.Env):
             unit.guid == guid
             for unit in observation.units
         )
+
+    def _target_contact_guids(
+        self,
+        observation: Observation,
+    ) -> set[str]:
+        contacts = observation.side(
+            self.config.scenario.player_side
+        ).contacts
+        target_type_contacts = tuple(
+            contact
+            for contact in contacts
+            if (contact.contact_type or "").strip().lower()
+            in self.config.rl.target_contact_types
+        )
+        posture_available = any(
+            contact.posture is not None
+            for contact in target_type_contacts
+        )
+        return {
+            contact.guid
+            for contact in target_type_contacts
+            if contact.guid
+            and (contact.is_hostile or not posture_available)
+        }
 
     def _heading_alignment(
         self,
@@ -278,6 +331,40 @@ class CMOTutorialGymEnv(gym.Env):
     ):
         super().reset(seed=seed)
 
+        start_position = None
+        scenario = self.config.scenario
+        if scenario.start_position_enabled:
+            latitude = scenario.start_latitude
+            longitude = scenario.start_longitude
+            heading = scenario.start_heading
+
+            if (
+                scenario.randomize_start_position
+                and scenario.start_position_random_radius_km > 0
+            ):
+                radius_km = (
+                    math.sqrt(float(self.np_random.random()))
+                    * scenario.start_position_random_radius_km
+                )
+                bearing = float(self.np_random.uniform(0.0, 2.0 * math.pi))
+                latitude += radius_km * math.cos(bearing) / 111.32
+                longitude += radius_km * math.sin(bearing) / (
+                    111.32 * max(math.cos(math.radians(latitude)), 0.1)
+                )
+
+            if scenario.randomize_start_heading:
+                heading = (
+                    heading
+                    + float(
+                        self.np_random.uniform(
+                            -scenario.start_heading_random_range_deg,
+                            scenario.start_heading_random_range_deg,
+                        )
+                    )
+                ) % 360.0
+
+            start_position = (latitude, longitude, heading)
+
         if (
             self.config.auto_reset.enabled
             and (
@@ -295,7 +382,7 @@ class CMOTutorialGymEnv(gym.Env):
                 "bootstrap.lua를 실행한 뒤 학습을 재시작하십시오."
             )
 
-        observation, info = self.env.reset()
+        observation, info = self.env.reset(start_position=start_position)
 
         self.current_observation = observation
         self.episode_steps = 0
@@ -306,6 +393,7 @@ class CMOTutorialGymEnv(gym.Env):
         self.invalid_attack_reason = None
         self.previous_action = None
         self.last_attack_step = None
+        self.episode_enemy_destroyed = False
 
         unit = self._unit(observation)
         _, distance_km = self._nearest_contact(
@@ -315,7 +403,13 @@ class CMOTutorialGymEnv(gym.Env):
 
         self.previous_target_distance_km = distance_km
         self.previous_contact_exists = distance_km is not None
+        self.previous_target_contact_guids = (
+            self._target_contact_guids(observation)
+        )
         self.previous_fuel_ratio = unit.fuel_ratio
+        self.episode_initial_score = observation.side(
+            self.config.scenario.player_side
+        ).total_score
 
         info.update(
             {
@@ -461,6 +555,15 @@ class CMOTutorialGymEnv(gym.Env):
         )
         result = self.env.step(selected_action)
         current_observation = result.observation
+        action_result_matches = (
+            current_observation.last_action_id
+            == result.info.get("action_id")
+        )
+        attack_assignment_confirmed: bool | None = None
+        if action_value == 9 and action_result_matches:
+            attack_assignment_confirmed = (
+                current_observation.attack_assigned
+            )
 
         ownship_destroyed = not self._unit_exists(
             current_observation,
@@ -489,10 +592,17 @@ class CMOTutorialGymEnv(gym.Env):
                     "selected_action": selected_action.name,
                     "target_distance_km": None,
                     "success": False,
+                    "enemy_destroyed": False,
+                    "mission_success": False,
+                    "target_reached": False,
                     "episode_steps": self.episode_steps,
                     "ownship_destroyed": True,
                     "invalid_attack": self.invalid_attack,
                     "invalid_attack_reason": self.invalid_attack_reason,
+                    "attack_request_valid": self.valid_attack,
+                    "attack_assignment_confirmed": (
+                        attack_assignment_confirmed
+                    ),
                 }
             )
 
@@ -536,13 +646,11 @@ class CMOTutorialGymEnv(gym.Env):
                 self.config.rl.max_target_distance_km,
                 1.0,
             )
-            previous_potential = (
-                -self.previous_target_distance_km / max_distance
-            )
-            current_potential = -distance_km / max_distance
+            # Reward only real progress.  The previous discounted-potential
+            # formula produced a small positive reward even at constant range.
             distance_reward = (
-                0.99 * current_potential - previous_potential
-            )
+                self.previous_target_distance_km - distance_km
+            ) / max_distance
             reward += (
                 self.config.rl.distance_progress_scale
                 * distance_reward
@@ -569,8 +677,10 @@ class CMOTutorialGymEnv(gym.Env):
         if self.invalid_attack:
             reward += self.config.rl.invalid_attack_penalty
 
-        if self.valid_attack:
+        if attack_assignment_confirmed is True:
             reward += self.config.rl.valid_attack_reward
+        elif self.valid_attack and attack_assignment_confirmed is False:
+            reward += self.config.rl.invalid_attack_penalty
 
         if action_value == 9:
             reward += self.config.rl.attack_request_cost
@@ -590,9 +700,28 @@ class CMOTutorialGymEnv(gym.Env):
         )
         reward += score_reward
 
-        enemy_destroyed = score_delta > 0
+        # A score change alone is not proof of a kill. Require a tracked hostile
+        # contact to disappear in the same transition as a positive score event.
+        score_increased = score_delta > 0
+        current_target_contact_guids = self._target_contact_guids(
+            current_observation
+        )
+        disappeared_target_guids = (
+            self.previous_target_contact_guids
+            - current_target_contact_guids
+        )
+        enemy_destroyed = bool(
+            score_increased and disappeared_target_guids
+        )
+        if (
+            result.terminated
+            and result.info.get("scenario_success_hint") is True
+            and self.previous_target_contact_guids
+        ):
+            enemy_destroyed = True
         if enemy_destroyed:
             reward += self.config.reward.kill_reward
+            self.episode_enemy_destroyed = True
 
         if (
             self.previous_fuel_ratio is not None
@@ -609,32 +738,52 @@ class CMOTutorialGymEnv(gym.Env):
 
         self.previous_target_distance_km = distance_km
         self.previous_contact_exists = current_contact_exists
+        self.previous_target_contact_guids = (
+            current_target_contact_guids
+        )
         self.previous_fuel_ratio = current_unit.fuel_ratio
         self.previous_action = action_value
         self.current_observation = current_observation
         self.episode_steps += 1
 
+        target_reached = bool(
+            self.config.rl.target_success_distance_km > 0.0
+            and distance_km is not None
+            and distance_km
+            <= self.config.rl.target_success_distance_km
+        )
         mission_success = bool(
-            result.terminated and current_score > 0
+            result.terminated
+            and (
+                self.episode_enemy_destroyed
+                or result.info.get("scenario_success_hint") is True
+            )
         )
         success = bool(
-            enemy_destroyed
+            target_reached
             or mission_success
         )
         terminated = bool(
             result.terminated
-            or enemy_destroyed
+            or target_reached
         )
-        truncated = (
+        truncated = bool(
             self.episode_steps
             >= self.config.rl.max_episode_steps
+            and not terminated
         )
 
         if mission_success:
             reward += self.config.reward.mission_success_reward
 
+        if target_reached:
+            reward += self.config.reward.success_bonus
+
         if result.terminated and not mission_success:
             reward += self.config.reward.failure_penalty
+
+        if truncated:
+            reward += self.config.reward.timeout_penalty
 
         reward = float(
             np.clip(
@@ -652,12 +801,26 @@ class CMOTutorialGymEnv(gym.Env):
                 "target_distance_km": distance_km,
                 "success": success,
                 "enemy_destroyed": enemy_destroyed,
+                "score_increased": score_increased,
+                "disappeared_target_guids": sorted(
+                    disappeared_target_guids
+                ),
+                "target_reached": target_reached,
                 "mission_success": mission_success,
                 "ownship_destroyed": ownship_destroyed,
                 "episode_steps": self.episode_steps,
                 "invalid_attack": self.invalid_attack,
                 "invalid_attack_reason": self.invalid_attack_reason,
                 "valid_attack": self.valid_attack,
+                "attack_request_valid": self.valid_attack,
+                "attack_assignment_confirmed": (
+                    attack_assignment_confirmed
+                ),
+                "assigned_weapon_dbid": (
+                    current_observation.assigned_weapon_dbid
+                    if attack_assignment_confirmed is True
+                    else None
+                ),
                 "last_attack_step": self.last_attack_step,
                 "heading_alignment": alignment,
                 "score_delta": score_delta,
@@ -671,4 +834,3 @@ class CMOTutorialGymEnv(gym.Env):
             truncated,
             info,
         )
-

@@ -14,7 +14,7 @@ from stable_baselines3.common.monitor import Monitor
 
 from cmo_tutorial.config import load_config
 from cmo_tutorial.gym_env import CMOTutorialGymEnv
-
+import gymnasium as gym
 
 class EpisodeRewardCallback(BaseCallback):
     """Print and persist one row for every completed episode."""
@@ -111,6 +111,13 @@ def main() -> None:
     environment = Monitor(
         CMOTutorialGymEnv(config),
         filename=str(output_dir / "monitor.csv"),
+        info_keywords=(
+            "success",
+            "mission_success",
+            "target_reached",
+            "enemy_destroyed",
+            "ownship_destroyed",
+        ),
     )
 
     if args.resume:

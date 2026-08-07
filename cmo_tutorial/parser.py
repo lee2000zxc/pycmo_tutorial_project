@@ -143,6 +143,14 @@ def _parse_contacts(
                     contact_node,
                     "CS",
                 ),
+                posture=_text(
+                    contact_node,
+                    "Posture",
+                ),
+                identification_status=_text(
+                    contact_node,
+                    "IdentificationStatus",
+                ),
             )
         )
 
@@ -385,5 +393,17 @@ def parse_observation_xml(
         units=units,
         scenario_ended=bool(
             scenario_ended
+        ),
+        last_action_id=_text(
+            root,
+            "LastActionID",
+        ),
+        attack_assigned=_bool(
+            root,
+            "AttackAssigned",
+        ),
+        assigned_weapon_dbid=_int(
+            root,
+            "AssignedWeaponDBID",
         ),
     )

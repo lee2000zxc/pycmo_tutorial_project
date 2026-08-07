@@ -138,11 +138,17 @@ python scripts/check_gym_env.py
 
 ## 7. 통신 방식
 
+> `bootstrap.lua`는 학습/에이전트 연결을 시작할 때만 실행합니다. 일반 플레이 중 실행하면 Python이 없어도 CMO의 반복 observation/action 이벤트가 계속 동작해 Pulse Time이 크게 증가할 수 있습니다. 일반 플레이로 돌아갈 때는 `python scripts\shutdown_bridge.py` 또는 `shutdown.lua`를 실행하십시오.
+
+`auto_reset.reload_on_first_reset: true`이면 `train_ppo.py` 시작 시 첫 reset부터 `File → Load Recent`의 첫 저장본을 불러오고, 목표 배속을 설정한 뒤 시뮬레이션을 재생합니다. 일반 플레이 저장본과 별도로 RL 시작용 저장본을 만드십시오. RL 시작용 저장본에는 bootstrap으로 생성된 PyCMO 이벤트가 포함되어 있어야 하며 `File → Load Recent`의 첫 항목이어야 합니다.
+
+시나리오 종료 시 CMO가 `Scenario End` 창을 띄우면 Python이 창을 감지해 Enter로 닫고 episode를 종료한 뒤 자동 reset합니다. 빌드나 언어 설정에 따라 제목이 다르면 `auto_reset.scenario_end_window_title`을 실제 창 제목 일부로 변경하십시오.
+
 1. CMO Lua 이벤트가 일정한 시나리오 시간 간격으로 관측 XML을 `.inst` 파일에 기록합니다.
 2. Python은 `.inst` 파일의 XML을 읽고 `Observation` 객체로 변환합니다.
 3. Python은 실행할 Lua를 `pycmo_agent_action.lua`에 원자적으로 기록합니다.
 4. CMO Lua 이벤트가 action 파일을 주기적으로 실행합니다.
-5. action 파일은 실행 후 no-op 상태로 교체되어 같은 명령이 반복되지 않습니다.
+5. action 파일에는 세션별 고유 ID와 증가 sequence가 포함됩니다. CMO Lua 전역 상태가 이미 처리한 ID를 기억하므로 같은 파일을 다시 읽어도 명령은 한 번만 실행됩니다.
 
 ## 8. 퍼즈 현상 관련
 
@@ -171,6 +177,18 @@ pytest -q
 - Scenario title, side name, unit name은 CMO 내부 문자열과 정확히 일치해야 합니다.
 - `.inst` 파일 형식이 달라 파싱되지 않으면 `data/raw`에 파일을 복사한 뒤 파서를 조정해야 합니다.
 - 강화학습 전에 규칙 기반 명령이 안정적으로 동작하는지 먼저 확인해야 합니다.
+
+학습을 `Ctrl+C`로 중단하거나 정상 종료하면 환경의 `close()`가 bridge 종료 action을 보내 반복 observation/action 이벤트를 제거합니다. 강제 종료로 정리가 수행되지 않았으면 CMO Lua Console에서 다음을 실행합니다.
+
+Python에서 종료 action을 보낼 수도 있습니다.
+
+```powershell
+python scripts\shutdown_bridge.py
+```
+
+```lua
+ScenEdit_RunScript('C:/Program Files (x86)/Steam/steamapps/common/Command - Modern Operations/Lua/pycmo_tutorial3/shutdown.lua', true)
+```
 
 
 ## 11. 강화학습(PPO)
@@ -240,7 +258,7 @@ tensorboard --logdir outputs\ppo\tensorboard
 
 ### 보상과 에피소드 초기화
 
-보상은 기본 step penalty에 contact 탐지, 목표와의 거리 변화, CMO 점수 변화, 연료 소모를 반영하며 목표 거리 이내에 접근하면 성공 보상을 부여합니다. 관련 계수는 `config.yaml`의 `reward`와 `rl` 항목에서 조정합니다.
+보상은 기본 step penalty에 contact 탐지, 목표와의 거리 변화, CMO 점수 변화, 연료 소모를 반영합니다. `target_success_distance_km`가 0보다 클 때만 목표 거리 접근을 성공으로 사용합니다. 점수 증가만으로는 격추나 episode 성공으로 판정하지 않습니다.
 
 `rl.soft_reset: true`는 Python의 에피소드 step, 이전 목표 거리, 이전 연료량만 초기화합니다. CMO 상태까지 초기화하는 반복 학습에는 Steam UI 기반 자동 로드를 사용할 수 있습니다.
 
@@ -256,7 +274,7 @@ auto_reset:
 
 자동 로드를 사용하기 전에 CMO에서 `bootstrap.lua`를 실행한 상태로 시나리오를 저장하고, 해당 파일이 `File → Load Recent` 목록 맨 위에 있는지 확인해야 합니다. 그래야 다시 불러온 시나리오에도 관측·행동 이벤트가 남아 있습니다. `reload_on_first_reset: true`이므로 `train_ppo.py`가 시작될 때 수행하는 첫 `env.reset()`부터 최근 시나리오를 다시 불러옵니다.
 
-현재 `rl.max_episode_steps: 200`으로 설정되어 있어 정상 진행 중에는 200번째 step에서 에피소드가 잘리고, PPO가 다음 `reset()`을 호출할 때 시나리오를 자동으로 다시 불러옵니다. 시나리오 자체가 종료되거나 성공·실패 terminal 조건이 먼저 발생하면 해당 시점에 조기 reset됩니다.
+현재 `rl.max_episode_steps: 100`으로 설정되어 있어 정상 진행 중에는 100번째 step에서 에피소드가 잘리고, PPO가 다음 `reset()`을 호출할 때 시나리오를 자동으로 다시 불러옵니다. 시나리오 자체가 종료되거나 성공·실패 terminal 조건이 먼저 발생하면 해당 시점에 조기 reset됩니다.
 
 `Side selection and briefing` 탐색이나 화면 좌표 클릭은 사용하지 않습니다. 최근 시나리오를 직접 불러온 뒤 CMO 창에서 `Enter`로 1배속을 설정하고 Numpad `+` 키를 두 번 보내 5배속으로 변경한 다음 `Space`로 시뮬레이션을 시작합니다. Python 에이전트는 새 observation에서 `scenario.controlled_unit`으로 지정된 항공기를 다시 선택합니다. 이름을 비워 두면 첫 번째 아군 Aircraft를 선택합니다.
 

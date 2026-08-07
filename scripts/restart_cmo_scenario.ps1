@@ -10,23 +10,43 @@ param(
 $ErrorActionPreference = "Stop"
 
 $shell = New-Object -ComObject WScript.Shell
+$restartedFromEvaluation = $false
 
-if (-not $shell.AppActivate($ScenarioWindowTitle)) {
-    throw "CMO scenario window not found: $ScenarioWindowTitle"
+# A completed scenario opens Player Evaluation after Scenario End is closed.
+# Its third Tab stop is "Restart From Save" in the current CMO UI.  Use that
+# button when available so the normal File -> Load Recent path is not executed
+# a second time for the same episode.
+if ($shell.AppActivate("Player Evaluation")) {
+    Start-Sleep -Milliseconds 300
+    $shell.SendKeys("{TAB}")
+    Start-Sleep -Milliseconds 300
+    $shell.SendKeys("{TAB}")
+    Start-Sleep -Milliseconds 300
+    $shell.SendKeys("{TAB}")        
+    Start-Sleep -Milliseconds 200
+    $shell.SendKeys("{ENTER}")
+    $restartedFromEvaluation = $true
+    Start-Sleep -Milliseconds 2000
 }
 
-Start-Sleep -Milliseconds ([int]($MenuDelaySeconds * 1000))
+if (-not $restartedFromEvaluation) {
+    if (-not $shell.AppActivate($ScenarioWindowTitle)) {
+        throw "CMO scenario window not found: $ScenarioWindowTitle"
+    }
 
-# File -> Load Recent -> first item.
-# Opening the submenu with Right automatically selects its first item.
-# Do not send Home here: CMO can move the focus back to the parent menu.
-$shell.SendKeys("%f")
-Start-Sleep -Milliseconds 300
-$shell.SendKeys("{DOWN 6}")
-Start-Sleep -Milliseconds 300
-$shell.SendKeys("{RIGHT}")
-Start-Sleep -Milliseconds ([int]($MenuDelaySeconds * 1000))
-$shell.SendKeys("{ENTER}")
+    Start-Sleep -Milliseconds ([int]($MenuDelaySeconds * 1000))
+
+    # File -> Load Recent -> first item.
+    # Opening the submenu with Right automatically selects its first item.
+    # Do not send Home here: CMO can move the focus back to the parent menu.
+    $shell.SendKeys("%f")
+    Start-Sleep -Milliseconds 300
+    $shell.SendKeys("{DOWN 6}")
+    Start-Sleep -Milliseconds 300
+    $shell.SendKeys("{RIGHT}")
+    Start-Sleep -Milliseconds ([int]($MenuDelaySeconds * 1000))
+    $shell.SendKeys("{ENTER}")
+}
 
 # Load the recent scenario directly without side-selection automation.
 # Then activate the map window, set the requested compression, and start.

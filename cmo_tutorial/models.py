@@ -17,6 +17,15 @@ class UnitState:
 class ContactState:
     guid: str; name: str|None; contact_type: str|None
     latitude: float|None; longitude: float|None; altitude_m: float|None; speed_kts: float|None
+    posture: str|None = None; identification_status: str|None = None
+
+    @property
+    def is_hostile(self) -> bool:
+        if self.posture is None:
+            return False
+        return self.posture.strip().lower() in {
+            "h", "hostile", "4",
+        }
 
 @dataclass(frozen=True)
 class SideState:
@@ -28,6 +37,9 @@ class Observation:
     title: str; scenario_time: int; start_time: int|None; duration: int|None
     status: str|None; time_compression: int|None
     sides: tuple[SideState,...]; units: tuple[UnitState,...]; scenario_ended: bool=False
+    last_action_id: str|None = None
+    attack_assigned: bool|None = None
+    assigned_weapon_dbid: int|None = None
     def side(self,name):
         for s in self.sides:
             if s.name==name:return s

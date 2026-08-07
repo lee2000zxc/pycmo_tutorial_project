@@ -11,10 +11,15 @@ def sample_xml():
   <Duration>1000</Duration>
   <Status>Running</Status>
   <TimeCompression>0</TimeCompression>
+  <LastActionID>session:7</LastActionID>
+  <AttackAssigned>true</AttackAssigned>
+  <AssignedWeaponDBID>516</AssignedWeaponDBID>
   <Sides>
     <Side>
       <ID>s1</ID><Name>Blue</Name><TotalScore>10</TotalScore>
-      <Contacts></Contacts>
+      <Contacts><Contact><ID>c1</ID><Name>Bandit</Name><Type>Air</Type>
+      <Posture>H</Posture><IdentificationStatus>KnownClass</IdentificationStatus>
+      <Lat>36.2</Lat><Lon>127.2</Lon></Contact></Contacts>
     </Side>
   </Sides>
   <ActiveUnits>
@@ -31,8 +36,13 @@ def sample_xml():
 def test_parse_observation():
     obs = parse_observation_xml(sample_xml())
     assert obs.title == "Aircraft Tutorial 3"
+    assert obs.last_action_id == "session:7"
+    assert obs.attack_assigned is True
+    assert obs.assigned_weapon_dbid == 516
     assert obs.side("Blue").total_score == 10
-    assert obs.side("Blue").contacts == ()
+    contact = obs.side("Blue").contacts[0]
+    assert contact.is_hostile
+    assert contact.identification_status == "KnownClass"
     unit = obs.aircraft("Blue")[0]
     assert unit.name == "Tanker [Wing Drogue & Centerline Boom]"
     assert unit.fuel_ratio == 0.5

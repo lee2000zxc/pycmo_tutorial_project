@@ -18,9 +18,12 @@ local function add_regular(e,t,a,seconds,script)
 end
 function setup_pycmo_tutorial3(o)
   local folder=string.gsub(o.folder,'\\','/'); if string.sub(folder,-1)~='/' then folder=folder..'/' end
-  local lib=folder..'pycmo_lib.lua'; local af=folder..o.action_filename
-  local setup="ScenEdit_RunScript('"..lib.."', true)\r\n"
-  add_regular('PyCMO Execute agent action','PyCMO Execute agent action trigger','PyCMO Execute agent action action',o.action_interval_seconds,setup.."local ok,err=pcall(function() ScenEdit_RunScript('"..af.."',true) end)\r\nif not ok then print(err) end")
-  add_regular('PyCMO Export observation','PyCMO Export observation trigger','PyCMO Export observation action',o.observation_interval_seconds,setup..'PycmoExportScenarioToXML()')
+  local runtime=folder..'runtime_config.lua'; local lib=folder..'pycmo_lib.lua'; local af=folder..o.action_filename
+  -- Persisted while the scenario is running. Generated action files use this
+  -- sequence to guarantee at-most-once execution across RegularTime ticks.
+  PYCMO_LAST_ACTION_ID = nil
+  local observation_setup="ScenEdit_RunScript('"..runtime.."', true)\r\nScenEdit_RunScript('"..lib.."', true)\r\n"
+  add_regular('PyCMO Execute agent action','PyCMO Execute agent action trigger','PyCMO Execute agent action action',o.action_interval_seconds,"local ok,err=pcall(function() ScenEdit_RunScript('"..af.."',true) end)\r\nif not ok then print(err) end")
+  add_regular('PyCMO Export observation','PyCMO Export observation trigger','PyCMO Export observation action',o.observation_interval_seconds,observation_setup..'PycmoExportScenarioToXML()')
   PycmoScenarioHasEnded(false); PycmoExportScenarioToXML(); VP_SetTimeCompression(o.time_compression or 0)
 end

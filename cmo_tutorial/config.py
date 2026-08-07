@@ -20,6 +20,14 @@ class ScenarioConfig:
     title: str
     player_side: str
     controlled_unit: str
+    start_position_enabled: bool
+    start_latitude: float
+    start_longitude: float
+    start_heading: float
+    randomize_start_position: bool
+    start_position_random_radius_km: float
+    randomize_start_heading: bool
+    start_heading_random_range_deg: float
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,10 @@ class AutoResetConfig:
     restart_timeout_seconds: float
     menu_delay_seconds: float
     target_time_compression: int
+    dismiss_scenario_end_dialog: bool
+    scenario_end_window_title: str
+    dismiss_special_messages_dialog: bool
+    special_messages_window_title: str
 
 
 @dataclass(frozen=True)
@@ -48,6 +60,7 @@ class RewardConfig:
     step_penalty: float
     success_bonus: float
     failure_penalty: float
+    timeout_penalty: float
     kill_reward: float
     ownship_loss_penalty: float
     mission_success_reward: float
@@ -55,6 +68,7 @@ class RewardConfig:
 
 @dataclass(frozen=True)
 class RLConfig:
+    target_contact_types: tuple[str, ...]
     attack_weapon_candidates: tuple[int, ...]
     attack_weapon_quantity: int
     attack_min_distance_km: float
@@ -153,6 +167,39 @@ def _bool_value(value: Any, default: bool) -> bool:
     return bool(value)
 
 
+def _validate_config(config: AppConfig) -> None:
+    if not -90 <= config.scenario.start_latitude <= 90:
+        raise ValueError("start_latitude must be between -90 and 90")
+    if not -180 <= config.scenario.start_longitude <= 180:
+        raise ValueError("start_longitude must be between -180 and 180")
+    if not 0 <= config.scenario.start_heading < 360:
+        raise ValueError("start_heading must be between 0 and 360")
+    if config.scenario.start_position_random_radius_km < 0:
+        raise ValueError("start_position_random_radius_km must not be negative")
+    if not 0 <= config.scenario.start_heading_random_range_deg <= 180:
+        raise ValueError(
+            "start_heading_random_range_deg must be between 0 and 180"
+        )
+    if config.protocol.observation_timeout_seconds <= 0:
+        raise ValueError("observation_timeout_seconds must be positive")
+    if config.protocol.poll_interval_seconds <= 0:
+        raise ValueError("poll_interval_seconds must be positive")
+    if config.rl.max_episode_steps <= 0:
+        raise ValueError("max_episode_steps must be positive")
+    if not config.rl.target_contact_types:
+        raise ValueError("target_contact_types must not be empty")
+    if config.rl.waypoint_step_deg <= 0:
+        raise ValueError("waypoint_step_deg must be positive")
+    if config.rl.max_target_distance_km <= 0:
+        raise ValueError("max_target_distance_km must be positive")
+    if config.rl.attack_min_distance_km > config.rl.attack_max_distance_km:
+        raise ValueError("attack distance minimum exceeds maximum")
+    if config.rl.preferred_attack_min_km > config.rl.preferred_attack_max_km:
+        raise ValueError("preferred attack distance minimum exceeds maximum")
+    if config.rl.reward_clip_min >= config.rl.reward_clip_max:
+        raise ValueError("reward_clip_min must be less than reward_clip_max")
+
+
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     config_path = Path(path)
     if not config_path.exists():
@@ -184,7 +231,16 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if int(dbid) > 0
     )
 
-    return AppConfig(
+    target_contact_types = tuple(
+        str(value).strip().lower()
+        for value in rl.get(
+            "target_contact_types",
+            ["Air", "Aircraft"],
+        )
+        if str(value).strip()
+    )
+
+    config = AppConfig(
         cmo=CMOConfig(
             install_dir=Path(_required(cmo, "install_dir")),
             import_export_dir=Path(
@@ -202,6 +258,30 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
             controlled_unit=str(
                 scenario.get("controlled_unit", "")
+            ),
+            start_position_enabled=_bool_value(
+                scenario.get("start_position_enabled"), False
+            ),
+            start_latitude=float(
+                scenario.get("start_latitude", 0.0)
+            ),
+            start_longitude=float(
+                scenario.get("start_longitude", 0.0)
+            ),
+            start_heading=float(
+                scenario.get("start_heading", 0.0)
+            ),
+            randomize_start_position=_bool_value(
+                scenario.get("randomize_start_position"), False
+            ),
+            start_position_random_radius_km=float(
+                scenario.get("start_position_random_radius_km", 0.0)
+            ),
+            randomize_start_heading=_bool_value(
+                scenario.get("randomize_start_heading"), False
+            ),
+            start_heading_random_range_deg=float(
+                scenario.get("start_heading_random_range_deg", 0.0)
             ),
         ),
         auto_reset=AutoResetConfig(
@@ -235,6 +315,26 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
                 auto_reset.get(
                     "target_time_compression",
                     5,
+                )
+            ),
+            dismiss_scenario_end_dialog=_bool_value(
+                auto_reset.get("dismiss_scenario_end_dialog"),
+                True,
+            ),
+            scenario_end_window_title=str(
+                auto_reset.get(
+                    "scenario_end_window_title",
+                    "Scenario End",
+                )
+            ),
+            dismiss_special_messages_dialog=_bool_value(
+                auto_reset.get("dismiss_special_messages_dialog"),
+                True,
+            ),
+            special_messages_window_title=str(
+                auto_reset.get(
+                    "special_messages_window_title",
+                    "Special Messages",
                 )
             ),
         ),
@@ -274,6 +374,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             failure_penalty=float(
                 reward.get("failure_penalty", -100.0)
             ),
+            timeout_penalty=float(
+                reward.get("timeout_penalty", -20.0)
+            ),
             kill_reward=float(
                 reward.get("kill_reward", 100.0)
             ),
@@ -285,6 +388,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
         ),
         rl=RLConfig(
+            target_contact_types=target_contact_types,
             # 공격 관련 설정
             attack_weapon_candidates=weapon_candidates,
             attack_weapon_quantity=int(
@@ -483,3 +587,5 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ),
         ),
     )
+    _validate_config(config)
+    return config

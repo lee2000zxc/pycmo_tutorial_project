@@ -22,6 +22,8 @@ auto_reset:
   menu_delay_seconds: 1
   # 지원 값: 1, 2, 5
   target_time_compression: 5
+  dismiss_scenario_end_dialog: true
+  scenario_end_window_title: 'Scenario End'
 
 protocol:
   action_filename: 'pycmo_agent_action.lua'

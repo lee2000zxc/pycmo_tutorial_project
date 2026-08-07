@@ -8,14 +8,30 @@ scenario:
   title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
   player_side: 'Israel'
   controlled_unit: 'Sufa #1'
+  # 시나리오를 다시 불러온 직후 아군기를 이 위치로 이동한다.
+  start_position_enabled: true
+  start_latitude: 32.90925
+  start_longitude: 35.64529
+  start_heading: 90.0
+  # 각 episode마다 기준점 반경 10km 안에서 균등하게 시작한다.
+  randomize_start_position: true
+  start_position_random_radius_km: 10.0
+  randomize_start_heading: true
+  start_heading_random_range_deg: 20.0
 
 auto_reset:
   enabled: true
+  # train_ppo 시작 시 첫 reset부터 RL 시작 저장본을 로드하고 재생한다.
   reload_on_first_reset: true
   scenario_window_title: 'Flight Tutorial - AAW 1 - Simple Air Intercept'
   restart_timeout_seconds: 60
   menu_delay_seconds: 1
   target_time_compression: 5
+  dismiss_scenario_end_dialog: true
+  scenario_end_window_title: 'Scenario End'
+  dismiss_special_messages_dialog: true
+  # 앞의 메시지 개수는 달라질 수 있으므로 제목의 고정된 부분만 사용한다.
+  special_messages_window_title: 'Special Messages'
 
 protocol:
   action_filename: 'pycmo_agent_action.lua'
@@ -36,16 +52,23 @@ protocol:
 #  default_altitude_m: null
 
 reward:
-  score_delta_scale: 1.0
-  step_penalty: -0.01
+  # CMO 점수는 보조 신호로만 사용하고 성공/격추 보상과의 중복을 줄인다.
+  score_delta_scale: 0.1
+  step_penalty: -0.005
   success_bonus: 5.0
   failure_penalty: -100.0
+  timeout_penalty: -2.0
 
-  kill_reward: 100.0
+  kill_reward: 50.0
   ownship_loss_penalty: -100.0
-  mission_success_reward: 150.0
+  mission_success_reward: 100.0
 
 rl:
+  # 이 튜토리얼은 공중 요격이므로 시설/기지 contact는 표적에서 제외한다.
+  target_contact_types:
+    - Air
+    - Aircraft
+
   attack_weapon_candidates:
     - 516
     - 51
@@ -56,36 +79,38 @@ rl:
   attack_max_distance_km: 80.0
   attack_cooldown_steps: 3
 
-  waypoint_step_deg: 0.03
-  # 200번째 step 후 truncated=True가 되어 다음 reset에서 시나리오 자동 로드
-  max_episode_steps: 200
+  # 방향 action마다 약 9~11km 앞에 waypoint를 지정한다.
+  waypoint_step_deg: 0.10
+  # 100번째 RL step 후 truncated=True가 되어 다음 reset에서 시나리오 자동 로드
+  max_episode_steps: 100
   target_success_distance_km: 0.0
   max_target_distance_km: 300.0
 
-  distance_progress_scale: 1.0
+  distance_progress_scale: 5.0
 
   contact_acquired_reward: 0.5
-  contact_maintain_reward: 0.01
-  no_contact_penalty: -0.05
+  contact_maintain_reward: 0.0
+  no_contact_penalty: -0.02
 
-  heading_alignment_scale: 0.01
+  heading_alignment_scale: 0.005
 
   preferred_attack_min_km: 25.0
   preferred_attack_max_km: 60.0
-  preferred_range_reward: 0.1
+  preferred_range_reward: 0.02
 
   too_close_distance_km: 10.0
-  too_close_penalty: -0.2
+  too_close_penalty: -0.05
 
-  valid_attack_reward: 0.5
-  invalid_attack_penalty: -0.2
-  attack_request_cost: -0.02
+  # observation으로 실제 무장 할당 성공이 확인됐을 때만 부여한다.
+  valid_attack_reward: 0.2
+  invalid_attack_penalty: -0.05
+  attack_request_cost: -0.005
 
-  fuel_penalty_scale: 1.0
-  action_change_penalty: -0.002
+  fuel_penalty_scale: 0.1
+  action_change_penalty: -0.001
 
-  reward_clip_min: -200.0
-  reward_clip_max: 200.0
+  reward_clip_min: -100.0
+  reward_clip_max: 100.0
 
   auto_launch: true
   soft_reset: true
